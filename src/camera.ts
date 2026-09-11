@@ -1,5 +1,7 @@
 export const MAX_PHOTO_EDGE = 1600;
+export const MAX_PHOTO_BYTES = 800_000;
 export const JPEG_QUALITY = 0.82;
+const MAX_RESIZE_ATTEMPTS = 12;
 
 export type CameraSession = {
   stream: MediaStream;
@@ -68,24 +70,50 @@ async function drawToJpeg(
   zoom = 1,
 ): Promise<Blob> {
   const crop = calculateZoomCrop(sourceWidth, sourceHeight, zoom);
-  const size = calculateContainSize(crop.width, crop.height);
+  let size = calculateContainSize(crop.width, crop.height);
   const canvas = document.createElement("canvas");
-  canvas.width = size.width;
-  canvas.height = size.height;
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context) throw new CameraError("Chrome could not prepare the photograph.");
-  context.drawImage(
-    source,
-    crop.x,
-    crop.y,
-    crop.width,
-    crop.height,
-    0,
-    0,
-    size.width,
-    size.height,
-  );
-  return canvasBlob(canvas);
+
+  for (let attempt = 0; attempt < MAX_RESIZE_ATTEMPTS; attempt += 1) {
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new CameraError("Chrome could not prepare the photograph.");
+    context.drawImage(
+      source,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
+      0,
+      0,
+      size.width,
+      size.height,
+    );
+
+    // Canvas re-encoding omits EXIF and other source metadata. Reducing pixel
+    // area as needed also gives a strict upper bound for the uploaded file.
+    const blob = await canvasBlob(canvas);
+    if (blob.size <= MAX_PHOTO_BYTES) return blob;
+    size = calculateReducedSize(size.width, size.height, blob.size);
+  }
+
+  throw new CameraError("Chrome could not reduce the photograph below 800 KB.");
+}
+
+export function calculateReducedSize(
+  width: number,
+  height: number,
+  encodedBytes: number,
+  maxBytes = MAX_PHOTO_BYTES,
+): { width: number; height: number } {
+  if (width <= 0 || height <= 0 || encodedBytes <= 0 || maxBytes <= 0) {
+    throw new CameraError("The camera returned an invalid image size.");
+  }
+  const scale = Math.min(0.9, Math.sqrt(maxBytes / encodedBytes) * 0.95);
+  return {
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+  };
 }
 
 type ZoomCapabilities = MediaTrackCapabilities & {

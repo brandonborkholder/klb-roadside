@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyPreferredZoom, CameraError, calculateContainSize, calculateZoomCrop } from "../src/camera";
+import {
+  applyPreferredZoom,
+  CameraError,
+  calculateContainSize,
+  calculateReducedSize,
+  calculateZoomCrop,
+  MAX_PHOTO_BYTES,
+} from "../src/camera";
 
 describe("calculateContainSize", () => {
   it("keeps a smaller image at its original dimensions", () => {
@@ -13,6 +20,19 @@ describe("calculateContainSize", () => {
 
   it("rejects invalid camera dimensions", () => {
     expect(() => calculateContainSize(0, 100)).toThrowError(CameraError);
+  });
+});
+
+describe("calculateReducedSize", () => {
+  it("reduces image area enough to target an upload below 800 KB", () => {
+    const size = calculateReducedSize(1600, 1200, 1_600_000);
+    expect(size.width).toBe(1074);
+    expect(size.height).toBe(806);
+    expect(size.width * size.height).toBeLessThan(1600 * 1200 * (MAX_PHOTO_BYTES / 1_600_000));
+  });
+
+  it("always makes progress when an encoder reports a small overage", () => {
+    expect(calculateReducedSize(1600, 1200, 800_001)).toEqual({ width: 1440, height: 1080 });
   });
 });
 
