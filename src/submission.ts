@@ -1,4 +1,5 @@
 import { PUBLICSTUFF } from "./config";
+import { MAX_PHOTO_BYTES } from "./camera";
 import type { PendingDraft, Profile, SubmissionReceipt } from "./types";
 
 const SPACE_ID = "40448";
@@ -26,6 +27,9 @@ function requireReport(profile: Profile, draft: PendingDraft): asserts draft is 
     throw new SubmissionError("Complete all contact information in Settings.", "validation");
   }
   if (!draft.photo.size) throw new SubmissionError("Take a photograph first.", "validation");
+  if (draft.photo.size > MAX_PHOTO_BYTES) {
+    throw new SubmissionError("Retake the photograph so it can be reduced below 800 KB.", "validation");
+  }
   if (!draft.location) throw new SubmissionError("Capture the sign's location first.", "validation");
   if (!draft.violationAddress.trim()) {
     throw new SubmissionError("Confirm the sign's address before submitting.", "validation");

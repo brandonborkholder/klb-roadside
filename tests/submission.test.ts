@@ -91,6 +91,16 @@ describe("PublicStuff submission payload", () => {
     expect(extractZipcode("Sterling VA 20165-1234")).toBe("20165-1234");
     expect(extractZipcode("21040 Sycolin Rd, Ashburn, VA 20147, USA")).toBe("20147");
   });
+
+  it("refuses to submit a photograph larger than 800 KB", () => {
+    const oversizedDraft = {
+      ...draft,
+      photo: new Blob([new Uint8Array(800_001)], { type: "image/jpeg" }),
+    };
+    expect(() => buildSubmissionForm(profile, oversizedDraft)).toThrowError(
+      "Retake the photograph so it can be reduced below 800 KB.",
+    );
+  });
 });
 
 describe("PublicStuff submission response", () => {
