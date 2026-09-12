@@ -29,6 +29,7 @@ let profile: Profile | null = null;
 let draft: PendingDraft | null = null;
 let receipt: SubmissionReceipt | null = null;
 let cameraSession: CameraSession | null = null;
+let cameraStarting = false;
 let captureAttempt = 0;
 let reviewPhotoUrl: string | null = null;
 let draftSaveTimer: number | null = null;
@@ -76,6 +77,7 @@ function appHeader(title: string, showSettings = false): string {
 
 function stopCamera(): void {
   captureAttempt += 1;
+  cameraStarting = false;
   cameraSession?.stop();
   cameraSession = null;
 }
@@ -223,6 +225,7 @@ function renderCapture(): void {
 
 async function activateCapture(): Promise<void> {
   const attempt = ++captureAttempt;
+  cameraStarting = true;
   const video = requireElement<HTMLVideoElement>("camera-preview");
   const cameraStage = requireElement<HTMLElement>("camera-stage");
   const shutter = requireElement<HTMLButtonElement>("shutter");
@@ -243,12 +246,12 @@ async function activateCapture(): Promise<void> {
   });
 
   try {
-    cameraSession = await startCamera(video);
+    const session = await startCamera(video);
     if (attempt !== captureAttempt) {
-      cameraSession.stop();
-      cameraSession = null;
+      session.stop();
       return;
     }
+    cameraSession = session;
     zoomChip.textContent = cameraSession.zoomLabel;
     cameraMessage.hidden = true;
     shutter.disabled = false;
@@ -295,6 +298,8 @@ async function activateCapture(): Promise<void> {
     cameraMessage.textContent =
       error instanceof CameraError ? error.message : "Camera preview unavailable.";
     cameraMessage.classList.add("camera-error");
+  } finally {
+    if (attempt === captureAttempt) cameraStarting = false;
   }
 
   shutter.addEventListener("click", async () => {
@@ -706,6 +711,24 @@ async function registerServiceWorker(): Promise<void> {
     // The app remains usable online if service worker registration fails.
   }
 }
+
+function resumeCamera(): void {
+  if (
+    screen === "capture" &&
+    !cameraSession &&
+    !cameraStarting &&
+    document.visibilityState === "visible"
+  ) {
+    renderCapture();
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") stopCamera();
+  else resumeCamera();
+});
+window.addEventListener("pagehide", stopCamera);
+window.addEventListener("pageshow", resumeCamera);
 
 async function boot(): Promise<void> {
   try {
