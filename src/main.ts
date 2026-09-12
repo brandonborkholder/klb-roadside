@@ -10,13 +10,13 @@ import {
 } from "./camera";
 import { formatCoordinates, getCurrentLocation, getLocationReadiness, locationQuality } from "./location";
 import { reverseGeocode } from "./geocoding";
-import { submitReport, SubmissionError } from "./submission";
+import { formatSubmissionDiagnostics, submitReport, SubmissionError } from "./submission";
 import { AppRepository } from "./storage";
 import type { CapturedLocation, PendingDraft, Profile, SubmissionReceipt } from "./types";
 
 type Screen = "onboarding" | "capture" | "review" | "settings" | "success";
 
-const BUILD = "m2-submit-1";
+const BUILD = "m2-submit-2";
 const OFFICIAL_FORM =
   "https://iframe.publicstuff.com/#/?client_id=1295&request_type_id=1011942";
 const repository = new AppRepository();
@@ -57,6 +57,33 @@ function setBusy(button: HTMLButtonElement, busy: boolean, label: string): void 
   button.disabled = busy;
   button.dataset.originalLabel ??= button.textContent ?? "";
   button.textContent = busy ? label : button.dataset.originalLabel;
+}
+
+function renderSubmissionDiagnostics(): void {
+  const panel = requireElement<HTMLElement>("submission-diagnostics");
+  const diagnostics = draft?.submissionDiagnostics ?? [];
+  panel.hidden = diagnostics.length === 0 || !draft;
+  if (!draft || diagnostics.length === 0) return;
+  requireElement<HTMLElement>("submission-diagnostics-text").textContent = formatSubmissionDiagnostics(
+    draft.id,
+    diagnostics,
+  );
+}
+
+async function shareSubmissionDiagnostics(): Promise<void> {
+  if (!draft?.submissionDiagnostics?.length) return;
+  const text = formatSubmissionDiagnostics(draft.id, draft.submissionDiagnostics);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "Sign Spotter submission diagnostics", text });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    announce("Submission diagnostics copied.");
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    announce("Could not share diagnostics. Select and copy the text instead.");
+  }
 }
 
 function appHeader(title: string, showSettings = false): string {
@@ -388,6 +415,12 @@ function renderReview(): void {
           <input id="description" type="hidden" />
           <p class="compact-summary"><strong>Photo + location</strong><span id="contact-summary"></span></p>
           <p id="review-feedback" class="feedback" role="alert"></p>
+          <section id="submission-diagnostics" class="submission-diagnostics" hidden>
+            <strong>Submission diagnostics</strong>
+            <span>Contains timestamps, outcomes, and HTTP status only — no photo, address, or account details.</span>
+            <button id="share-submission-diagnostics" class="text-button" type="button">Share diagnostics</button>
+            <pre id="submission-diagnostics-text"></pre>
+          </section>
           <div class="submit-dock">
             <div class="submit-actions">
               <button id="reset-capture" class="secondary-button" type="button">Reset</button>
@@ -412,6 +445,7 @@ function renderReview(): void {
   } else if (draft.status === "failed") {
     setFeedback("review-feedback", "The previous submission failed. Review the details and retry.");
   }
+  renderSubmissionDiagnostics();
   renderGpsPanel();
   bindSettingsButton("review");
 
@@ -424,6 +458,9 @@ function renderReview(): void {
     await repository.deleteDraft();
     draft = null;
     navigate("capture");
+  });
+  requireElement<HTMLButtonElement>("share-submission-diagnostics").addEventListener("click", () => {
+    void shareSubmissionDiagnostics();
   });
   requireElement<HTMLButtonElement>("refresh-location").addEventListener("click", async (event) => {
     await saveReviewFields();
@@ -464,7 +501,13 @@ function renderReview(): void {
             submittedAt: new Date().toISOString(),
             live: false,
           }
-        : await submitReport(profile!, draft!);
+        : await submitReport(profile!, draft!, fetch, {
+            onDiagnostic: async (diagnostic) => {
+              if (!draft) return;
+              draft.submissionDiagnostics = [...(draft.submissionDiagnostics ?? []), diagnostic].slice(-10);
+              await repository.saveDraft(draft);
+            },
+          });
       await repository.deleteDraft();
       draft = null;
       navigate("success");
@@ -473,10 +516,15 @@ function renderReview(): void {
         draft.status = error instanceof SubmissionError && error.kind === "uncertain" ? "uncertain" : "failed";
         await repository.saveDraft(draft);
       }
+      const lastDiagnostic = draft?.submissionDiagnostics?.at(-1);
+      const diagnosticDetail = lastDiagnostic
+        ? ` Last diagnostic: ${lastDiagnostic.message} (${lastDiagnostic.durationMs} ms).`
+        : "";
       setFeedback(
         "review-feedback",
-        error instanceof SubmissionError ? error.message : "The report could not be submitted.",
+        `${error instanceof SubmissionError ? error.message : "The report could not be submitted."}${diagnosticDetail} Submission diagnostics were saved on this device for troubleshooting.`,
       );
+      renderSubmissionDiagnostics();
     } finally {
       setBusy(button, false, "");
     }
