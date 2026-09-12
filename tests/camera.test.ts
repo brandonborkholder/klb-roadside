@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyCameraZoom,
   applyPreferredZoom,
   CameraError,
   calculateContainSize,
+  calculatePinchZoom,
   calculateReducedSize,
   calculateZoomCrop,
   MAX_PHOTO_BYTES,
@@ -47,6 +49,18 @@ describe("calculateZoomCrop", () => {
   });
 });
 
+describe("calculatePinchZoom", () => {
+  it("scales zoom with finger distance", () => {
+    expect(calculatePinchZoom(2, 100, 150)).toBe(3);
+    expect(calculatePinchZoom(2, 100, 50)).toBe(1);
+  });
+
+  it("clamps zoom to the camera range", () => {
+    expect(calculatePinchZoom(2, 100, 1000)).toBe(8);
+    expect(calculatePinchZoom(2, 100, 10)).toBe(1);
+  });
+});
+
 describe("applyPreferredZoom", () => {
   it("requests exact two-times hardware zoom when supported", async () => {
     const applyConstraints = vi.fn(async () => undefined);
@@ -64,5 +78,27 @@ describe("applyPreferredZoom", () => {
       applyConstraints: vi.fn(),
     } as unknown as MediaStreamTrack;
     await expect(applyPreferredZoom(track)).resolves.toBe(false);
+  });
+});
+
+describe("applyCameraZoom", () => {
+  it("clamps and applies zoom through the camera track", async () => {
+    const applyConstraints = vi.fn(async () => undefined);
+    const track = {
+      getCapabilities: () => ({ zoom: { min: 1, max: 5, step: 0.1 } }),
+      applyConstraints,
+    } as unknown as MediaStreamTrack;
+
+    await expect(applyCameraZoom(track, 8)).resolves.toBe(5);
+    expect(applyConstraints).toHaveBeenCalledWith({ advanced: [{ zoom: 5 }] });
+  });
+
+  it("reports when native camera zoom is unavailable", async () => {
+    const track = {
+      getCapabilities: () => ({}),
+      applyConstraints: vi.fn(),
+    } as unknown as MediaStreamTrack;
+
+    await expect(applyCameraZoom(track, 2)).resolves.toBeNull();
   });
 });

@@ -114,9 +114,8 @@ input[readonly] { background: #eef2f3; color: var(--muted); }
 .capture-page .icon-button { border-color: #ffffff35; background: #081116ad; color: white; }
 .capture-page .live-ribbon { position: absolute; z-index: 4; top: calc(max(.75rem, env(safe-area-inset-top)) + 52px); right: .75rem; left: .75rem; margin: 0; background: #fee6e2e8; color: #842b22; }
 .capture-page .test-ribbon { position: absolute; z-index: 4; top: calc(max(.75rem, env(safe-area-inset-top)) + 52px); right: .75rem; left: .75rem; margin: 0; background: #f5c84ce8; color: #3f3100; }
-.camera-stage { position: absolute; inset: 0; overflow: hidden; }
-#camera-preview { width: 100%; height: 100%; object-fit: cover; background: #05090b; }
-#camera-preview.digital-zoom-2x { transform: scale(2); }
+.camera-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
+#camera-preview { width: 100%; height: 100%; object-fit: cover; background: #05090b; transform: scale(var(--camera-digital-zoom, 1)); transform-origin: center; }
 .viewfinder { position: absolute; inset: 24% 12% 27%; border: 1px solid #ffffff66; border-radius: 15px; box-shadow: 0 0 0 999px #00000018; }
 .viewfinder::before, .viewfinder::after, .viewfinder span::before, .viewfinder span::after { position: absolute; width: 24px; height: 24px; border-color: white; border-style: solid; content: ""; }
 .viewfinder::before { top: -2px; left: -2px; border-width: 3px 0 0 3px; border-radius: 7px 0 0; }

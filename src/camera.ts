@@ -6,7 +6,11 @@ const MAX_RESIZE_ATTEMPTS = 12;
 export type CameraSession = {
   stream: MediaStream;
   digitalZoom: number;
+  zoom: number;
+  minZoom: number;
+  maxZoom: number;
   zoomLabel: string;
+  setZoom(zoom: number): Promise<number>;
   stop(): void;
 };
 
@@ -48,6 +52,25 @@ export function calculateZoomCrop(
     width: cropWidth,
     height: cropHeight,
   };
+}
+
+export function calculatePinchZoom(
+  startingZoom: number,
+  startingDistance: number,
+  currentDistance: number,
+  minZoom = 1,
+  maxZoom = 8,
+): number {
+  if (
+    startingZoom <= 0 ||
+    startingDistance <= 0 ||
+    currentDistance <= 0 ||
+    minZoom <= 0 ||
+    maxZoom < minZoom
+  ) {
+    throw new CameraError("The camera received an invalid pinch gesture.");
+  }
+  return Math.min(maxZoom, Math.max(minZoom, startingZoom * (currentDistance / startingDistance)));
 }
 
 function canvasBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -120,10 +143,29 @@ type ZoomCapabilities = MediaTrackCapabilities & {
   zoom?: { min: number; max: number; step?: number };
 };
 
+function getZoomCapabilities(track: MediaStreamTrack): ZoomCapabilities["zoom"] | undefined {
+  const zoom = (track.getCapabilities?.() as ZoomCapabilities | undefined)?.zoom;
+  return zoom && Number.isFinite(zoom.min) && Number.isFinite(zoom.max) ? zoom : undefined;
+}
+
+export async function applyCameraZoom(
+  track: MediaStreamTrack,
+  requestedZoom: number,
+): Promise<number | null> {
+  const capabilities = getZoomCapabilities(track);
+  if (!capabilities) return null;
+  const zoom = Math.min(capabilities.max, Math.max(capabilities.min, requestedZoom));
+  try {
+    await track.applyConstraints({ advanced: [{ zoom } as MediaTrackConstraintSet] });
+    return zoom;
+  } catch {
+    return null;
+  }
+}
+
 export async function applyPreferredZoom(track: MediaStreamTrack, preferred = 2): Promise<boolean> {
-  const capabilities = track.getCapabilities?.() as ZoomCapabilities | undefined;
-  const zoom = capabilities?.zoom;
-  if (!zoom || !Number.isFinite(zoom.min) || !Number.isFinite(zoom.max)) return false;
+  const zoom = getZoomCapabilities(track);
+  if (!zoom) return false;
   if (zoom.min > preferred || zoom.max < preferred) return false;
   try {
     await track.applyConstraints({ advanced: [{ zoom: preferred } as MediaTrackConstraintSet] });
@@ -146,20 +188,39 @@ export async function startCamera(video: HTMLVideoElement): Promise<CameraSessio
         height: { ideal: 1080 },
       },
     });
-    const hardwareZoom = await applyPreferredZoom(stream.getVideoTracks()[0]!);
-    const digitalZoom = hardwareZoom ? 1 : 2;
+    const track = stream.getVideoTracks()[0]!;
+    const capabilities = getZoomCapabilities(track);
+    const appliedZoom = await applyCameraZoom(track, 2);
+    const hardwareZoom = capabilities !== undefined && appliedZoom !== null;
+    const initialZoom = appliedZoom ?? 2;
     video.srcObject = stream;
-    video.classList.toggle("digital-zoom-2x", digitalZoom === 2);
+    video.style.setProperty("--camera-digital-zoom", hardwareZoom ? "1" : String(initialZoom));
     await video.play();
-    return {
+    const session: CameraSession = {
       stream,
-      digitalZoom,
-      zoomLabel: hardwareZoom ? "2× zoom" : "2× digital zoom",
+      digitalZoom: hardwareZoom ? 1 : initialZoom,
+      zoom: initialZoom,
+      minZoom: hardwareZoom ? capabilities!.min : 1,
+      maxZoom: hardwareZoom ? capabilities!.max : 8,
+      zoomLabel: `${initialZoom.toFixed(1).replace(/\.0$/, "")}× ${hardwareZoom ? "zoom" : "digital zoom"}`,
+      async setZoom(requestedZoom) {
+        const zoom = Math.min(session.maxZoom, Math.max(session.minZoom, requestedZoom));
+        if (hardwareZoom) {
+          const applied = await applyCameraZoom(track, zoom);
+          if (applied === null) return session.zoom;
+        }
+        session.zoom = zoom;
+        session.digitalZoom = hardwareZoom ? 1 : zoom;
+        session.zoomLabel = `${zoom.toFixed(1).replace(/\.0$/, "")}× ${hardwareZoom ? "zoom" : "digital zoom"}`;
+        video.style.setProperty("--camera-digital-zoom", String(session.digitalZoom));
+        return zoom;
+      },
       stop() {
         stream.getTracks().forEach((track) => track.stop());
         video.srcObject = null;
       },
     };
+    return session;
   } catch (error) {
     const name = error instanceof DOMException ? error.name : "";
     const message =

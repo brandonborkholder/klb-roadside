@@ -3,6 +3,7 @@ import { authenticatePublicStuff, AuthenticationError } from "./auth";
 import {
   type CameraSession,
   CameraError,
+  calculatePinchZoom,
   captureVideoFrame,
   resizePhotoFile,
   startCamera,
@@ -202,7 +203,7 @@ function renderCapture(): void {
   root.innerHTML = `
     <main class="capture-page">
       ${appHeader("Capture sign", true)}
-      <section class="camera-stage" aria-label="Camera">
+      <section id="camera-stage" class="camera-stage" aria-label="Camera">
         <video id="camera-preview" playsinline muted></video>
         <div class="viewfinder" aria-hidden="true"><span></span></div>
         <div class="camera-message" id="camera-message">Starting rear camera…</div>
@@ -223,6 +224,7 @@ function renderCapture(): void {
 async function activateCapture(): Promise<void> {
   const attempt = ++captureAttempt;
   const video = requireElement<HTMLVideoElement>("camera-preview");
+  const cameraStage = requireElement<HTMLElement>("camera-stage");
   const shutter = requireElement<HTMLButtonElement>("shutter");
   const cameraMessage = requireElement<HTMLElement>("camera-message");
   const zoomChip = requireElement<HTMLElement>("zoom-chip");
@@ -250,6 +252,45 @@ async function activateCapture(): Promise<void> {
     zoomChip.textContent = cameraSession.zoomLabel;
     cameraMessage.hidden = true;
     shutter.disabled = false;
+
+    let pinchDistance = 0;
+    let pinchZoom = cameraSession.zoom;
+    const touchDistance = (touches: TouchList) =>
+      Math.hypot(touches[0]!.clientX - touches[1]!.clientX, touches[0]!.clientY - touches[1]!.clientY);
+    cameraStage.addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.touches.length !== 2 || !cameraSession) return;
+        event.preventDefault();
+        pinchDistance = touchDistance(event.touches);
+        pinchZoom = cameraSession.zoom;
+      },
+      { passive: false },
+    );
+    cameraStage.addEventListener(
+      "touchmove",
+      (event) => {
+        if (event.touches.length !== 2 || !cameraSession || pinchDistance === 0) return;
+        event.preventDefault();
+        const session = cameraSession;
+        void session.setZoom(
+          calculatePinchZoom(
+            pinchZoom,
+            pinchDistance,
+            touchDistance(event.touches),
+            session.minZoom,
+            session.maxZoom,
+          ),
+        ).then((zoom) => {
+          if (cameraSession !== session) return;
+          zoomChip.textContent = session.zoomLabel;
+        });
+      },
+      { passive: false },
+    );
+    cameraStage.addEventListener("touchend", () => {
+      pinchDistance = 0;
+    });
   } catch (error) {
     cameraMessage.textContent =
       error instanceof CameraError ? error.message : "Camera preview unavailable.";
