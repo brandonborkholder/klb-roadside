@@ -27,6 +27,18 @@ export type PendingDraft = {
   description: string;
   capturedAt: string;
   status: "reviewing" | "uncertain" | "failed";
+  submissionDiagnostics?: SubmissionDiagnostic[];
+};
+
+export type SubmissionDiagnostic = {
+  attemptedAt: string;
+  attempt: number;
+  outcome: "success" | "http-error" | "network-error" | "invalid-response" | "rejected-response";
+  status: number | null;
+  durationMs: number;
+  message: string;
+  responseStatusType?: string;
+  responseStatusCode?: string;
 };
 
 export type SubmissionReceipt = {

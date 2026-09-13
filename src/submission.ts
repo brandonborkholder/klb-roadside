@@ -1,6 +1,6 @@
 import { PUBLICSTUFF } from "./config";
 import { MAX_PHOTO_BYTES } from "./camera";
-import type { PendingDraft, Profile, SubmissionReceipt } from "./types";
+import type { PendingDraft, Profile, SubmissionDiagnostic, SubmissionReceipt } from "./types";
 
 const SPACE_ID = "40448";
 const REQUEST_TITLE = " Neighborhood and property zoning complaints";
@@ -73,6 +73,8 @@ export function buildSubmissionForm(profile: Profile, draft: PendingDraft): Form
 }
 
 type JsonObject = Record<string, unknown>;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 500;
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,50 +98,184 @@ export function parseSubmissionResponse(payload: unknown): SubmissionReceipt {
   return { requestId: String(requestId), submittedAt: new Date().toISOString(), live: true };
 }
 
+function responseStatusDiagnostic(payload: unknown): Pick<
+  SubmissionDiagnostic,
+  "responseStatusType" | "responseStatusCode"
+> {
+  if (!isObject(payload) || !isObject(payload.response) || !isObject(payload.response.status)) {
+    return {};
+  }
+  const status = payload.response.status;
+  return {
+    ...(typeof status.type === "string" ? { responseStatusType: status.type.slice(0, 80) } : {}),
+    ...(typeof status.code === "string" || typeof status.code === "number"
+      ? { responseStatusCode: String(status.code).slice(0, 40) }
+      : {}),
+  };
+}
+
+function retryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function retryDelay(attempt: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * 2 ** (attempt - 1)));
+}
+
+function diagnosticMessage(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`.slice(0, 240);
+  return "The browser could not reach PublicStuff.";
+}
+
+export function formatSubmissionDiagnostics(
+  draftId: string,
+  diagnostics: SubmissionDiagnostic[],
+): string {
+  return JSON.stringify({ formatVersion: 1, draftId, diagnostics }, null, 2);
+}
+
+export type SubmissionOptions = {
+  onDiagnostic?: (diagnostic: SubmissionDiagnostic) => void | Promise<void>;
+};
+
+function reportDiagnostic(
+  diagnostic: SubmissionDiagnostic,
+  options: SubmissionOptions,
+): Promise<void> {
+  return Promise.resolve(options.onDiagnostic?.(diagnostic));
+}
+
 export async function submitReport(
   profile: Profile,
   draft: PendingDraft,
   fetcher: typeof fetch = fetch,
+  options: SubmissionOptions = {},
 ): Promise<SubmissionReceipt> {
-  const body = buildSubmissionForm(profile, draft);
-  let response: Response;
-  try {
-    response = await fetcher(new URL("/api/2.0/request_submit", PUBLICSTUFF.apiOrigin), {
-      method: "POST",
-      mode: "cors",
-      credentials: "omit",
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "PublicStuff-Client": String(PUBLICSTUFF.clientId),
-      },
-      body,
-    });
-  } catch {
-    throw new SubmissionError(
-      "The connection ended without a confirmation. Check your PublicStuff account before retrying to avoid a duplicate.",
-      "uncertain",
-    );
+  for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const started = performance.now();
+    let response: Response;
+    try {
+      response = await fetcher(new URL("/api/2.0/request_submit", PUBLICSTUFF.apiOrigin), {
+        method: "POST",
+        mode: "cors",
+        credentials: "omit",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "PublicStuff-Client": String(PUBLICSTUFF.clientId),
+        },
+        body: buildSubmissionForm(profile, draft),
+      });
+    } catch (error) {
+      await reportDiagnostic(
+        {
+          attemptedAt: new Date().toISOString(),
+          attempt,
+          outcome: "network-error",
+          status: null,
+          durationMs: Math.round(performance.now() - started),
+          message: diagnosticMessage(error),
+        },
+        options,
+      );
+      throw new SubmissionError(
+        "The connection ended without a confirmation. Check your PublicStuff account before retrying to avoid a duplicate.",
+        "uncertain",
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      await reportDiagnostic(
+        {
+          attemptedAt: new Date().toISOString(),
+          attempt,
+          outcome: "http-error",
+          status: response.status,
+          durationMs: Math.round(performance.now() - started),
+          message: "PublicStuff rejected the saved session.",
+        },
+        options,
+      );
+      throw new SubmissionError("Your PublicStuff session expired. Reconnect in Settings.", "authentication");
+    }
+    if (!response.ok) {
+      const diagnostic: SubmissionDiagnostic = {
+        attemptedAt: new Date().toISOString(),
+        attempt,
+        outcome: "http-error",
+        status: response.status,
+        durationMs: Math.round(performance.now() - started),
+        message: `PublicStuff returned HTTP ${response.status}.`,
+      };
+      await reportDiagnostic(diagnostic, options);
+      if (retryableStatus(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
+        await retryDelay(attempt);
+        continue;
+      }
+      throw new SubmissionError(
+        response.status >= 500
+          ? `PublicStuff is unavailable (HTTP ${response.status}). Try again later.`
+          : `PublicStuff rejected the report (HTTP ${response.status}).`,
+        response.status >= 500 ? "server" : "validation",
+      );
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      await reportDiagnostic(
+        {
+          attemptedAt: new Date().toISOString(),
+          attempt,
+          outcome: "invalid-response",
+          status: response.status,
+          durationMs: Math.round(performance.now() - started),
+          message: diagnosticMessage(error),
+        },
+        options,
+      );
+      throw new SubmissionError(
+        "PublicStuff may have received the report, but returned invalid data. Check your account before retrying.",
+        "uncertain",
+      );
+    }
+    try {
+      const receipt = parseSubmissionResponse(payload);
+      await reportDiagnostic(
+        {
+          attemptedAt: new Date().toISOString(),
+          attempt,
+          outcome: "success",
+          status: response.status,
+          durationMs: Math.round(performance.now() - started),
+          message: "PublicStuff confirmed the report.",
+        },
+        options,
+      );
+      return receipt;
+    } catch (error) {
+      const rejected = error instanceof SubmissionError && error.kind === "validation";
+      await reportDiagnostic(
+        {
+          attemptedAt: new Date().toISOString(),
+          attempt,
+          outcome: rejected ? "rejected-response" : "invalid-response",
+          status: response.status,
+          durationMs: Math.round(performance.now() - started),
+          message: rejected
+            ? "PublicStuff returned a non-success submission response."
+            : diagnosticMessage(error),
+          ...responseStatusDiagnostic(payload),
+        },
+        options,
+      );
+      if (error instanceof SubmissionError) throw error;
+      throw new SubmissionError(
+        "PublicStuff may have received the report, but returned invalid data. Check your account before retrying.",
+        "uncertain",
+      );
+    }
   }
 
-  if (response.status === 401 || response.status === 403) {
-    throw new SubmissionError("Your PublicStuff session expired. Reconnect in Settings.", "authentication");
-  }
-  if (!response.ok) {
-    throw new SubmissionError(
-      response.status >= 500
-        ? `PublicStuff is unavailable (HTTP ${response.status}). Try again later.`
-        : `PublicStuff rejected the report (HTTP ${response.status}).`,
-      response.status >= 500 ? "server" : "validation",
-    );
-  }
-  try {
-    return parseSubmissionResponse(await response.json());
-  } catch (error) {
-    if (error instanceof SubmissionError) throw error;
-    throw new SubmissionError(
-      "PublicStuff may have received the report, but returned invalid data. Check your account before retrying.",
-      "uncertain",
-    );
-  }
+  throw new SubmissionError("PublicStuff could not submit the report.", "server");
 }
