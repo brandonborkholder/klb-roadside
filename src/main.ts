@@ -10,13 +10,12 @@ import {
 } from "./camera";
 import { formatCoordinates, getCurrentLocation, getLocationReadiness, locationQuality } from "./location";
 import { reverseGeocode } from "./geocoding";
-import { formatSubmissionDiagnostics, submitReport, SubmissionError } from "./submission";
+import { submitReport, SubmissionError } from "./submission";
 import { AppRepository } from "./storage";
 import type { CapturedLocation, PendingDraft, Profile, SubmissionReceipt } from "./types";
 
 type Screen = "onboarding" | "capture" | "review" | "settings" | "success";
 
-const BUILD = "m2-submit-2";
 const OFFICIAL_FORM =
   "https://iframe.publicstuff.com/#/?client_id=1295&request_type_id=1011942";
 const repository = new AppRepository();
@@ -60,45 +59,15 @@ function setBusy(button: HTMLButtonElement, busy: boolean, label: string): void 
   button.textContent = busy ? label : button.dataset.originalLabel;
 }
 
-function renderSubmissionDiagnostics(): void {
-  const panel = requireElement<HTMLElement>("submission-diagnostics");
-  const diagnostics = draft?.submissionDiagnostics ?? [];
-  panel.hidden = diagnostics.length === 0 || !draft;
-  if (!draft || diagnostics.length === 0) return;
-  requireElement<HTMLElement>("submission-diagnostics-text").textContent = formatSubmissionDiagnostics(
-    draft.id,
-    diagnostics,
-  );
-}
-
-async function shareSubmissionDiagnostics(): Promise<void> {
-  if (!draft?.submissionDiagnostics?.length) return;
-  const text = formatSubmissionDiagnostics(draft.id, draft.submissionDiagnostics);
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: "Sign Spotter submission diagnostics", text });
-      return;
-    }
-    await navigator.clipboard.writeText(text);
-    announce("Submission diagnostics copied.");
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") return;
-    announce("Could not share diagnostics. Select and copy the text instead.");
-  }
-}
-
 function appHeader(title: string, showSettings = false): string {
   return `
     <header class="app-header">
       <div class="brand-lockup">
         <span class="mini-mark" aria-hidden="true">SS</span>
-        <div><p class="eyebrow">Sign Spotter</p><h1>${title}</h1></div>
+        <div><p class="eyebrow">Loudoun County</p><h1>${title}</h1></div>
       </div>
       ${showSettings ? '<button id="open-settings" class="icon-button" type="button" aria-label="Settings">⚙</button>' : ""}
     </header>
-    ${import.meta.env.DEV
-      ? '<div class="test-ribbon"><strong>Development mode</strong><span>No complaint will be sent</span></div>'
-      : '<div class="live-ribbon"><strong>Live submission</strong><span>Submit sends to Loudoun County</span></div>'}
   `;
 }
 
@@ -161,7 +130,6 @@ function renderOnboarding(): void {
         </fieldset>
         <p id="setup-feedback" class="feedback" role="alert"></p>
         <button id="save-setup" class="primary-button" type="submit">Sign in and save setup</button>
-        ${import.meta.env.DEV ? '<button id="mock-setup" class="text-button" type="button">Use mock setup locally</button>' : ""}
       </form>
       <a class="official-link" href="${OFFICIAL_FORM}" target="_blank" rel="noreferrer">Open official form to create an account</a>
     </main>
@@ -204,13 +172,6 @@ function renderOnboarding(): void {
     }
   });
 
-  const mockButton = document.getElementById("mock-setup");
-  mockButton?.addEventListener("click", async () => {
-    if (!requireElement<HTMLFormElement>("setup-form").reportValidity()) return;
-    profile = profileFromSetup("m1-local-mock-session");
-    await repository.saveProfile(profile);
-    navigate("capture");
-  });
 }
 
 function profileFromSetup(apiKey: string): Profile {
@@ -420,18 +381,12 @@ function renderReview(): void {
           <input id="description" type="hidden" />
           <p class="compact-summary"><strong>Photo + location</strong><span id="contact-summary"></span></p>
           <p id="review-feedback" class="feedback" role="alert"></p>
-          <section id="submission-diagnostics" class="submission-diagnostics" hidden>
-            <strong>Submission diagnostics</strong>
-            <span>Contains timestamps, outcomes, and HTTP status only — no photo, address, or account details.</span>
-            <button id="share-submission-diagnostics" class="text-button" type="button">Share diagnostics</button>
-            <pre id="submission-diagnostics-text"></pre>
-          </section>
           <div class="submit-dock">
             <div class="submit-actions">
               <button id="reset-capture" class="secondary-button" type="button">Reset</button>
               <button id="submit-report" class="primary-button" type="submit" disabled>Submit report</button>
             </div>
-            <span>This sends the photo and details to Loudoun County</span>
+            <span>Your report, photo, and location go directly to Loudoun County.</span>
           </div>
         </form>
       </section>
@@ -450,7 +405,6 @@ function renderReview(): void {
   } else if (draft.status === "failed") {
     setFeedback("review-feedback", "The previous submission failed. Review the details and retry.");
   }
-  renderSubmissionDiagnostics();
   renderGpsPanel();
   bindSettingsButton("review");
 
@@ -463,9 +417,6 @@ function renderReview(): void {
     await repository.deleteDraft();
     draft = null;
     navigate("capture");
-  });
-  requireElement<HTMLButtonElement>("share-submission-diagnostics").addEventListener("click", () => {
-    void shareSubmissionDiagnostics();
   });
   requireElement<HTMLButtonElement>("refresh-location").addEventListener("click", async (event) => {
     await saveReviewFields();
@@ -500,19 +451,7 @@ function renderReview(): void {
     try {
       draft!.status = "uncertain";
       await repository.saveDraft(draft!);
-      receipt = import.meta.env.DEV
-        ? {
-            requestId: `DEV-${draft!.id.slice(0, 8).toUpperCase()}`,
-            submittedAt: new Date().toISOString(),
-            live: false,
-          }
-        : await submitReport(profile!, draft!, fetch, {
-            onDiagnostic: async (diagnostic) => {
-              if (!draft) return;
-              draft.submissionDiagnostics = [...(draft.submissionDiagnostics ?? []), diagnostic].slice(-10);
-              await repository.saveDraft(draft);
-            },
-          });
+      receipt = await submitReport(profile!, draft!);
       await repository.deleteDraft();
       draft = null;
       navigate("success");
@@ -521,15 +460,10 @@ function renderReview(): void {
         draft.status = error instanceof SubmissionError && error.kind === "uncertain" ? "uncertain" : "failed";
         await repository.saveDraft(draft);
       }
-      const lastDiagnostic = draft?.submissionDiagnostics?.at(-1);
-      const diagnosticDetail = lastDiagnostic
-        ? ` Last diagnostic: ${lastDiagnostic.message} (${lastDiagnostic.durationMs} ms).`
-        : "";
       setFeedback(
         "review-feedback",
-        `${error instanceof SubmissionError ? error.message : "The report could not be submitted."}${diagnosticDetail} Submission diagnostics were saved on this device for troubleshooting.`,
+        error instanceof SubmissionError ? error.message : "The report could not be submitted. Please try again.",
       );
-      renderSubmissionDiagnostics();
     } finally {
       setBusy(button, false, "");
     }
@@ -632,7 +566,6 @@ function renderSettings(): void {
         <button id="reset-app" class="danger-button" type="button">Reset all app data</button>
       </section>
       <button id="settings-back" class="text-button" type="button">Back</button>
-      <footer class="build-footer">Build ${BUILD}</footer>
     </main>
   `;
   requireElement<HTMLInputElement>("settings-name").value = profile.displayName;
@@ -709,16 +642,15 @@ function renderSettings(): void {
 }
 
 function renderSuccess(): void {
-  const live = receipt?.live === true;
   root.innerHTML = `
     <main class="page success-page">
-      ${appHeader(live ? "Report submitted" : "Development test complete")}
+      ${appHeader("Report submitted")}
       <section class="success-card">
         <div class="success-icon" aria-hidden="true">✓</div>
-        <p class="kicker">${live ? "Received by PublicStuff" : "Nothing was sent"}</p>
-        <h2>${live ? "Loudoun County received your report." : "The local workflow completed."}</h2>
-        <p>${live ? "The pending photograph was removed from this device after PublicStuff confirmed the submission." : "Development mode validated and removed the local draft without contacting the complaint endpoint."}</p>
-        <dl><div><dt>${live ? "Request ID" : "Local receipt"}</dt><dd id="receipt-id"></dd></div></dl>
+        <p class="kicker">Received by PublicStuff</p>
+        <h2>Loudoun County received your report.</h2>
+        <p>The pending photograph was removed from this device after PublicStuff confirmed the submission.</p>
+        <dl><div><dt>Request ID</dt><dd id="receipt-id"></dd></div></dl>
         <button id="capture-another" class="primary-button" type="button">Report another sign</button>
       </section>
     </main>
