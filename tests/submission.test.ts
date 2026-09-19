@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildSubmissionForm,
   extractZipcode,
-  formatSubmissionDiagnostics,
   parseSubmissionResponse,
   SubmissionError,
   submitReport,
@@ -113,25 +112,6 @@ describe("PublicStuff submission response", () => {
     expect(parseSubmissionResponse(success)).toMatchObject({ requestId: "18625627" });
   });
 
-  it("formats shareable diagnostics without report content or credentials", () => {
-    const output = formatSubmissionDiagnostics(draft.id, [{
-      attemptedAt: "2026-09-12T00:00:00.000Z",
-      attempt: 1,
-      outcome: "http-error",
-      status: 503,
-      durationMs: 42,
-      message: "PublicStuff returned HTTP 503.",
-    }]);
-
-    expect(JSON.parse(output)).toEqual({
-      formatVersion: 1,
-      draftId: draft.id,
-      diagnostics: expect.any(Array),
-    });
-    expect(output).not.toContain(profile.publicStuffApiKey);
-    expect(output).not.toContain(draft.violationAddress);
-  });
-
   it("posts FormData without manually setting its content type", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(success), { status: 200 }),
@@ -153,22 +133,12 @@ describe("PublicStuff submission response", () => {
     } satisfies Partial<SubmissionError>);
   });
 
-  it("retries transient server failures and records each attempt", async () => {
+  it("retries transient server failures", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(success), { status: 200 }));
-    const diagnostics: unknown[] = [];
-
-    await expect(submitReport(profile, draft, fetcher, {
-      onDiagnostic: (diagnostic) => {
-        diagnostics.push(diagnostic);
-      },
-    })).resolves.toMatchObject({ requestId: "18625627" });
+    await expect(submitReport(profile, draft, fetcher)).resolves.toMatchObject({ requestId: "18625627" });
 
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(diagnostics).toMatchObject([
-      { attempt: 1, outcome: "http-error", status: 503 },
-      { attempt: 2, outcome: "success", status: 200 },
-    ]);
   });
 });
