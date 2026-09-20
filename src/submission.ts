@@ -68,7 +68,7 @@ export function buildSubmissionForm(profile: Profile, draft: PendingDraft): Form
   append("client_id", PUBLICSTUFF.clientId);
   append("device", PUBLICSTUFF.device);
   append("api_key", profile.publicStuffApiKey);
-  form.append("uploadedfile", draft.photo, `sign-spotter-${draft.id}.jpg`);
+  form.append("uploadedfile", draft.photo, `klb-roadside-${draft.id}.jpg`);
   return form;
 }
 

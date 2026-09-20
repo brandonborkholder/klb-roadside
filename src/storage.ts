@@ -5,6 +5,7 @@ const DATABASE_VERSION = 1;
 const STORE_NAME = "app-state";
 const PROFILE_KEY = "profile";
 const DRAFT_KEY = "pending-draft";
+const SPLASH_SEEN_KEY = "splash-seen";
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -90,6 +91,14 @@ export class AppRepository {
 
   deleteDraft(): Promise<void> {
     return this.remove(DRAFT_KEY);
+  }
+
+  async hasSeenSplash(): Promise<boolean> {
+    return (await this.read<boolean>(SPLASH_SEEN_KEY)) === true;
+  }
+
+  markSplashSeen(): Promise<void> {
+    return this.write(SPLASH_SEEN_KEY, true);
   }
 
   async clearAll(): Promise<void> {

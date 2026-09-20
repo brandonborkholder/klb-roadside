@@ -1,5 +1,5 @@
 {
-  "name": "sign-spotter",
+  "name": "klb-roadside",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:safety": "node scripts/assert-m2-submit-artifact.mjs",
+    "test:safety": "node scripts/assert-submit-artifact.mjs",
     "icons": "node scripts/generate-icons.mjs"
   },
   "devDependencies": {

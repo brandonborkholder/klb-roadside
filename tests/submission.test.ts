@@ -105,7 +105,7 @@ describe("PublicStuff submission payload", () => {
 
 describe("PublicStuff submission response", () => {
   const success = JSON.parse(
-    readFileSync(new URL("../docs/publicstuff-request-submit-response.json", import.meta.url), "utf8"),
+    readFileSync(new URL("./fixtures/publicstuff-submit-response.json", import.meta.url), "utf8"),
   );
 
   it("parses the captured success fixture", () => {

@@ -1,4 +1,4 @@
-const CACHE_NAME = "sign-spotter-m2-submit-1";
+const CACHE_NAME = "klb-roadside-v1";
 const BASE_PATH = "/sign-spotter/";
 const APP_SHELL = [BASE_PATH, `${BASE_PATH}offline.html`, `${BASE_PATH}manifest.webmanifest`];
 
@@ -12,7 +12,7 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key.startsWith("sign-spotter-") && key !== CACHE_NAME).map((key) => caches.delete(key))),
+        Promise.all(keys.filter((key) => (key.startsWith("sign-spotter-") || key.startsWith("klb-roadside-")) && key !== CACHE_NAME).map((key) => caches.delete(key))),
       ),
   );
   self.clients.claim();
