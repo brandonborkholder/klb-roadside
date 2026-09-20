@@ -1,8 +1,8 @@
 {
   "id": "/sign-spotter/",
-  "name": "Sign Spotter",
-  "short_name": "Sign Spotter",
-  "description": "Fast capture workflow for Loudoun County sign violations.",
+  "name": "Keep Loudoun Beautiful - Roadside",
+  "short_name": "KLB: Roadside",
+  "description": "Fast, private roadside reporting for Loudoun County sign violations.",
   "start_url": "/sign-spotter/?capture=1",
   "scope": "/sign-spotter/",
   "display": "standalone",
@@ -40,7 +40,7 @@
     {
       "name": "Capture sign",
       "short_name": "Capture",
-      "description": "Open Sign Spotter directly to the camera.",
+      "description": "Open KLB: Roadside directly to the camera.",
       "url": "/sign-spotter/?capture=1",
       "icons": [
         {

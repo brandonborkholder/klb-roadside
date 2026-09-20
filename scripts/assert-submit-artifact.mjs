@@ -20,8 +20,8 @@ for (const file of await filesUnder("dist")) {
 
 for (const required of ["request_submit", "custom_field_25876", "uploadedfile"]) {
   if (!artifact.includes(required)) {
-    throw new Error(`M2 build failure: required submission marker ${required} is missing.`);
+    throw new Error(`Submission build failure: required submission marker ${required} is missing.`);
   }
 }
 
-console.log("M2 artifact check passed: real submission adapter is present.");
+console.log("Submission artifact check passed: real submission adapter is present.");

@@ -14,7 +14,7 @@ import { submitReport, SubmissionError } from "./submission";
 import { AppRepository } from "./storage";
 import type { CapturedLocation, PendingDraft, Profile, SubmissionReceipt } from "./types";
 
-type Screen = "onboarding" | "capture" | "review" | "settings" | "success";
+type Screen = "splash" | "onboarding" | "capture" | "review" | "settings" | "success";
 
 const OFFICIAL_FORM =
   "https://iframe.publicstuff.com/#/?client_id=1295&request_type_id=1011942";
@@ -63,7 +63,7 @@ function appHeader(title: string, showSettings = false): string {
   return `
     <header class="app-header">
       <div class="brand-lockup">
-        <span class="mini-mark" aria-hidden="true">SS</span>
+        <span class="mini-mark" aria-hidden="true">KLB</span>
         <div><p class="eyebrow">Loudoun County</p><h1>${title}</h1></div>
       </div>
       ${showSettings ? '<button id="open-settings" class="icon-button" type="button" aria-label="Settings">⚙</button>' : ""}
@@ -98,6 +98,31 @@ function bindSettingsButton(from: "capture" | "review"): void {
   });
 }
 
+function renderSplash(): void {
+  root.innerHTML = `
+    <main class="splash-page">
+      <section class="splash-card" aria-labelledby="splash-title">
+        <div class="brand-mark" aria-hidden="true">KLB</div>
+        <p class="kicker">Loudoun County</p>
+        <h1 id="splash-title">Report sign violations in a few steps.</h1>
+        <ol class="splash-steps">
+          <li>Create or sign in to a PublicStuff account.</li>
+          <li>Take a clear photo of the sign and confirm its location.</li>
+          <li>Review the details, then submit the report to Loudoun County.</li>
+        </ol>
+        <p class="splash-note">A PublicStuff account is required before you can submit a report.</p>
+        <a class="secondary-link" href="${OFFICIAL_FORM}" target="_blank" rel="noreferrer">Register for PublicStuff</a>
+        <button id="start-app" class="primary-button" type="button">Get started</button>
+      </section>
+    </main>
+  `;
+  requireElement<HTMLButtonElement>("start-app").addEventListener("click", async () => {
+    await repository.markSplashSeen();
+    screen = profile ? (draft ? "review" : "capture") : "onboarding";
+    render();
+  });
+}
+
 function renderOnboarding(): void {
   root.innerHTML = `
     <main class="page onboarding-page">
@@ -122,7 +147,7 @@ function renderOnboarding(): void {
         </fieldset>
         <fieldset>
           <legend>PublicStuff account</legend>
-          <p class="field-help">Loudoun requires an account before this complaint can be submitted.</p>
+          <p class="field-help">Loudoun requires a PublicStuff account before this complaint can be submitted. <a href="${OFFICIAL_FORM}" target="_blank" rel="noreferrer">Register for PublicStuff</a>.</p>
           <label>Account email<input id="account-email" name="accountEmail" type="email" autocomplete="username" required /></label>
           <label class="inline-check"><input id="same-email" type="checkbox" checked /> Same as contact email</label>
           <label>Password<input id="account-password" name="password" type="password" autocomplete="current-password" required /></label>
@@ -131,7 +156,7 @@ function renderOnboarding(): void {
         <p id="setup-feedback" class="feedback" role="alert"></p>
         <button id="save-setup" class="primary-button" type="submit">Sign in and save setup</button>
       </form>
-      <a class="official-link" href="${OFFICIAL_FORM}" target="_blank" rel="noreferrer">Open official form to create an account</a>
+      <a class="official-link" href="${OFFICIAL_FORM}" target="_blank" rel="noreferrer">Register for PublicStuff</a>
     </main>
   `;
 
@@ -666,6 +691,9 @@ function render(): void {
     case "onboarding":
       renderOnboarding();
       break;
+    case "splash":
+      renderSplash();
+      break;
     case "capture":
       renderCapture();
       break;
@@ -712,8 +740,14 @@ window.addEventListener("pageshow", resumeCamera);
 
 async function boot(): Promise<void> {
   try {
-    [profile, draft] = await Promise.all([repository.getProfile(), repository.getDraft()]);
-    screen = draft ? "review" : profile ? "capture" : "onboarding";
+    const [savedProfile, savedDraft, hasSeenSplash] = await Promise.all([
+      repository.getProfile(),
+      repository.getDraft(),
+      repository.hasSeenSplash(),
+    ]);
+    profile = savedProfile;
+    draft = savedDraft;
+    screen = hasSeenSplash ? (draft ? "review" : profile ? "capture" : "onboarding") : "splash";
     render();
     void registerServiceWorker();
   } catch (error) {
@@ -721,7 +755,7 @@ async function boot(): Promise<void> {
       <main class="fatal-screen"><h1>Local storage unavailable</h1><p id="fatal-message"></p><button onclick="location.reload()">Retry</button></main>
     `;
     requireElement<HTMLElement>("fatal-message").textContent =
-      error instanceof Error ? error.message : "Sign Spotter could not start.";
+      error instanceof Error ? error.message : "KLB: Roadside could not start.";
   }
 }
 
