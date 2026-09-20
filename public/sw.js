@@ -1,5 +1,5 @@
 const CACHE_NAME = "klb-roadside-v1";
-const BASE_PATH = "/sign-spotter/";
+const BASE_PATH = "/klb-roadside/";
 const APP_SHELL = [BASE_PATH, `${BASE_PATH}offline.html`, `${BASE_PATH}manifest.webmanifest`];
 
 self.addEventListener("install", (event) => {
