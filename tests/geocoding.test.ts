@@ -34,6 +34,7 @@ describe("reverse geocoding", () => {
     expect(url.searchParams.get("lon")).toBe("-77.520375");
     expect(url.searchParams.get("format")).toBe("jsonv2");
     expect(url.searchParams.get("layer")).toBe("address");
+    expect(buildReverseGeocodingUrl(location, 8).searchParams.get("zoom")).toBe("8");
   });
 
   it("returns the trimmed display address and county", async () => {
@@ -50,8 +51,38 @@ describe("reverse geocoding", () => {
 
   it("accepts only the county reported as Loudoun County", () => {
     expect(isLoudounCounty(" Loudoun County ")).toBe(true);
+    expect(isLoudounCounty("Loudoun")).toBe(true);
     expect(isLoudounCounty("Fairfax County")).toBe(false);
     expect(isLoudounCounty(null)).toBe(false);
+  });
+
+  it("uses the state district when Nominatim omits the county field", () => {
+    expect(parseReverseGeocodingResponse({
+      display_name: "21040 Sycolin Rd, Ashburn, VA 20147",
+      address: { state_district: "Loudoun County" },
+    })).toStrictEqual({
+      address: "21040 Sycolin Rd, Ashburn, VA 20147",
+      county: "Loudoun County",
+    });
+  });
+
+  it("looks up the county boundary when the street response has no county", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        display_name: "21040 Sycolin Rd, Ashburn, VA 20147",
+        address: { road: "Sycolin Rd" },
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        display_name: "Loudoun County, Virginia, United States",
+        address: { county: "Loudoun County" },
+      })));
+
+    await expect(reverseGeocode(location, fetcher as typeof fetch)).resolves.toStrictEqual({
+      address: "21040 Sycolin Rd, Ashburn, VA 20147",
+      county: "Loudoun County",
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetcher.mock.calls[1]![0])).searchParams.get("zoom")).toBe("8");
   });
 
   it("marks a response without county data as unverified", () => {

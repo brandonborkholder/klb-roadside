@@ -14,7 +14,10 @@ export class ReverseGeocodingError extends Error {
 type NominatimResponse = {
   display_name?: unknown;
   error?: unknown;
-  address?: { county?: unknown };
+  address?: {
+    county?: unknown;
+    state_district?: unknown;
+  };
 };
 
 export type ReverseGeocodedLocation = {
@@ -28,15 +31,23 @@ export const COUNTY_NOT_VERIFIED_MESSAGE =
   "We could not confirm this location's county. Retry location before submitting.";
 
 export function isLoudounCounty(county: string | null): boolean {
-  return county?.trim().toLocaleLowerCase("en-US") === "loudoun county";
+  const normalizedCounty = county?.trim().toLocaleLowerCase("en-US");
+  return normalizedCounty === "loudoun county" || normalizedCounty === "loudoun";
 }
 
-export function buildReverseGeocodingUrl(location: CapturedLocation): URL {
+function countyFromAddress(address: NominatimResponse["address"]): string | null {
+  for (const value of [address?.county, address?.state_district]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+export function buildReverseGeocodingUrl(location: CapturedLocation, zoom = 18): URL {
   const url = new URL(REVERSE_URL);
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("lat", String(location.latitude));
   url.searchParams.set("lon", String(location.longitude));
-  url.searchParams.set("zoom", "18");
+  url.searchParams.set("zoom", String(zoom));
   url.searchParams.set("addressdetails", "1");
   url.searchParams.set("layer", "address");
   url.searchParams.set("accept-language", navigator.language || "en-US");
@@ -55,7 +66,9 @@ export function parseReverseGeocodingResponse(value: unknown): ReverseGeocodedLo
   }
   return {
     address: response.display_name.trim(),
-    county: typeof response.address?.county === "string" ? response.address.county.trim() || null : null,
+    // Nominatim returns US counties as either `county` or `state_district`,
+    // depending on the matching OSM address hierarchy.
+    county: countyFromAddress(response.address),
   };
 }
 
@@ -63,28 +76,41 @@ export async function reverseGeocode(
   location: CapturedLocation,
   fetcher: typeof fetch = fetch,
 ): Promise<ReverseGeocodedLocation> {
-  const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
-  if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
-  lastRequestAt = Date.now();
+  const request = async (zoom: number): Promise<ReverseGeocodedLocation> => {
+    const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+    lastRequestAt = Date.now();
 
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetcher(buildReverseGeocodingUrl(location, zoom), {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new ReverseGeocodingError(`Address lookup returned HTTP ${response.status}.`);
+      }
+      return parseReverseGeocodingResponse(await response.json());
+    } catch (error) {
+      if (error instanceof ReverseGeocodingError) throw error;
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new ReverseGeocodingError("Address lookup timed out. Enter the address manually.");
+      }
+      throw new ReverseGeocodingError("Could not look up the address. Enter it manually.");
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  };
+
+  const addressLocation = await request(18);
+  if (addressLocation.county) return addressLocation;
+
   try {
-    const response = await fetcher(buildReverseGeocodingUrl(location), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new ReverseGeocodingError(`Address lookup returned HTTP ${response.status}.`);
-    }
-    return parseReverseGeocodingResponse(await response.json());
-  } catch (error) {
-    if (error instanceof ReverseGeocodingError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ReverseGeocodingError("Address lookup timed out. Enter the address manually.");
-    }
-    throw new ReverseGeocodingError("Could not look up the address. Enter it manually.");
-  } finally {
-    window.clearTimeout(timeout);
+    const countyLocation = await request(8);
+    return { ...addressLocation, county: countyLocation.county };
+  } catch {
+    // The street address is still usable if the supplemental county lookup fails.
+    return addressLocation;
   }
 }
