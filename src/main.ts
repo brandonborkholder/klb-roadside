@@ -372,6 +372,7 @@ async function resolveDraftAddress(location: CapturedLocation, announceResult = 
     const geocodedLocation = await reverseGeocode(location);
     if (!draft || screen !== "review" || draft.location !== location) return;
     draft.locationCounty = geocodedLocation.county;
+    renderGpsPanel();
     if (addressInput.value !== addressBeforeLookup) {
       await repository.saveDraft(draft);
       feedback.textContent = "Your edited address was kept.";
