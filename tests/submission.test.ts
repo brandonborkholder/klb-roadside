@@ -30,6 +30,7 @@ const draft: PendingDraft = {
     accuracyMeters: 12,
     capturedAt: "2026-09-04T00:00:00.000Z",
   },
+  locationCounty: "Loudoun County",
   violationAddress: "21040 Sycolin Rd, Ashburn, VA 20147, USA",
   description: "",
   capturedAt: "2026-09-04T00:00:00.000Z",
@@ -99,6 +100,16 @@ describe("PublicStuff submission payload", () => {
     };
     expect(() => buildSubmissionForm(profile, oversizedDraft)).toThrowError(
       "Retake the photograph so it can be reduced below 800 KB.",
+    );
+  });
+
+  it("refuses reports whose reverse-geocoded county is outside Loudoun County", () => {
+    const outsideLoudoun = {
+      ...draft,
+      locationCounty: "Fairfax County",
+    };
+    expect(() => buildSubmissionForm(profile, outsideLoudoun)).toThrowError(
+      "This location is outside Loudoun County. Complaints can only be submitted for signs in Loudoun County.",
     );
   });
 });

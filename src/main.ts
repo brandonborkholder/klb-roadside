@@ -9,7 +9,12 @@ import {
   startCamera,
 } from "./camera";
 import { formatCoordinates, getCurrentLocation, getLocationReadiness, locationQuality } from "./location";
-import { reverseGeocode } from "./geocoding";
+import {
+  COUNTY_NOT_VERIFIED_MESSAGE,
+  isLoudounCounty,
+  OUTSIDE_LOUDOUN_MESSAGE,
+  reverseGeocode,
+} from "./geocoding";
 import { submitReport, SubmissionError } from "./submission";
 import { AppRepository } from "./storage";
 import type { CapturedLocation, PendingDraft, Profile, SubmissionReceipt } from "./types";
@@ -346,6 +351,7 @@ async function storeCapturedPhoto(photo: Blob): Promise<void> {
     requestTypeId: 1011942,
     photo,
     location: null,
+    locationCounty: null,
     violationAddress: "",
     description: "",
     capturedAt: new Date().toISOString(),
@@ -363,18 +369,27 @@ async function resolveDraftAddress(location: CapturedLocation, announceResult = 
   feedback.textContent = "Looking up street address…";
   feedback.className = "field-hint address-loading";
   try {
-    const address = await reverseGeocode(location);
+    const geocodedLocation = await reverseGeocode(location);
     if (!draft || screen !== "review" || draft.location !== location) return;
+    draft.locationCounty = geocodedLocation.county;
     if (addressInput.value !== addressBeforeLookup) {
+      await repository.saveDraft(draft);
       feedback.textContent = "Your edited address was kept.";
       feedback.className = "field-hint address-success";
+      updateSubmitState();
       return;
     }
-    draft.violationAddress = address;
-    addressInput.value = address;
+    draft.violationAddress = geocodedLocation.address;
+    addressInput.value = geocodedLocation.address;
     await repository.saveDraft(draft);
-    feedback.textContent = "Address found. Verify or edit it before continuing.";
-    feedback.className = "field-hint address-success";
+    feedback.textContent = draft.locationCounty === null
+      ? COUNTY_NOT_VERIFIED_MESSAGE
+      : isLoudounCounty(draft.locationCounty)
+        ? "Address found and confirmed in Loudoun County. Verify or edit it before continuing."
+        : OUTSIDE_LOUDOUN_MESSAGE;
+    feedback.className = isLoudounCounty(draft.locationCounty)
+      ? "field-hint address-success"
+      : "field-hint address-warning";
     updateSubmitState();
     if (announceResult) announce("Location and address updated.");
   } catch (error) {
@@ -496,7 +511,7 @@ function renderReview(): void {
 
   updateSubmitState();
   if (!draft.location) void refreshDraftLocation();
-  else if (!draft.violationAddress) void resolveDraftAddress(draft.location, false);
+  else if (!draft.violationAddress || !draft.locationCounty) void resolveDraftAddress(draft.location, false);
 }
 
 async function refreshDraftLocation(button?: HTMLButtonElement): Promise<void> {
@@ -509,6 +524,7 @@ async function refreshDraftLocation(button?: HTMLButtonElement): Promise<void> {
   updateSubmitState();
   try {
     draft.location = await getCurrentLocation();
+    draft.locationCounty = null;
     draft.violationAddress = "";
     await repository.saveDraft(draft);
     renderGpsPanel();
@@ -528,7 +544,7 @@ async function refreshDraftLocation(button?: HTMLButtonElement): Promise<void> {
 function updateSubmitState(): void {
   const button = document.getElementById("submit-report") as HTMLButtonElement | null;
   const address = document.getElementById("violation-address") as HTMLInputElement | null;
-  if (button) button.disabled = !draft?.location || !address?.value.trim();
+  if (button) button.disabled = !draft?.location || !isLoudounCounty(draft.locationCounty ?? null) || !address?.value.trim();
 }
 
 function renderGpsPanel(): void {
@@ -536,6 +552,16 @@ function renderGpsPanel(): void {
   if (!draft?.location) {
     panel.className = "gps-panel gps-missing";
     panel.innerHTML = "<strong>Location unavailable</strong><span>Retry to enable submission.</span>";
+    return;
+  }
+  if (!draft.locationCounty) {
+    panel.className = "gps-panel gps-missing";
+    panel.innerHTML = `<strong>County not confirmed</strong><span>${COUNTY_NOT_VERIFIED_MESSAGE}</span>`;
+    return;
+  }
+  if (!isLoudounCounty(draft.locationCounty)) {
+    panel.className = "gps-panel gps-missing";
+    panel.innerHTML = `<strong>Outside Loudoun County</strong><span>${OUTSIDE_LOUDOUN_MESSAGE}</span>`;
     return;
   }
   const quality = locationQuality(draft.location.accuracyMeters);

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildReverseGeocodingUrl,
+  isLoudounCounty,
   parseReverseGeocodingResponse,
   reverseGeocode,
   ReverseGeocodingError,
@@ -35,13 +36,29 @@ describe("reverse geocoding", () => {
     expect(url.searchParams.get("layer")).toBe("address");
   });
 
-  it("returns a trimmed display address", async () => {
+  it("returns the trimmed display address and county", async () => {
     const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ display_name: "  21040 Sycolin Rd, Ashburn, VA 20147  " })),
+      new Response(JSON.stringify({
+        display_name: "  21040 Sycolin Rd, Ashburn, VA 20147  ",
+        address: { county: "Loudoun County" },
+      })),
     );
-    await expect(reverseGeocode(location, fetcher as typeof fetch)).resolves.toBe(
-      "21040 Sycolin Rd, Ashburn, VA 20147",
+    await expect(reverseGeocode(location, fetcher as typeof fetch)).resolves.toStrictEqual(
+      { address: "21040 Sycolin Rd, Ashburn, VA 20147", county: "Loudoun County" },
     );
+  });
+
+  it("accepts only the county reported as Loudoun County", () => {
+    expect(isLoudounCounty(" Loudoun County ")).toBe(true);
+    expect(isLoudounCounty("Fairfax County")).toBe(false);
+    expect(isLoudounCounty(null)).toBe(false);
+  });
+
+  it("marks a response without county data as unverified", () => {
+    expect(parseReverseGeocodingResponse({ display_name: "123 Main St" })).toStrictEqual({
+      address: "123 Main St",
+      county: null,
+    });
   });
 
   it("rejects responses without an address", () => {

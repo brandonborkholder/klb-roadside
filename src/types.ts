@@ -23,6 +23,7 @@ export type PendingDraft = {
   requestTypeId: 1011942;
   photo: Blob;
   location: CapturedLocation | null;
+  locationCounty?: string | null;
   violationAddress: string;
   description: string;
   capturedAt: string;

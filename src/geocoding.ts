@@ -11,7 +11,25 @@ export class ReverseGeocodingError extends Error {
   }
 }
 
-type NominatimResponse = { display_name?: unknown; error?: unknown };
+type NominatimResponse = {
+  display_name?: unknown;
+  error?: unknown;
+  address?: { county?: unknown };
+};
+
+export type ReverseGeocodedLocation = {
+  address: string;
+  county: string | null;
+};
+
+export const OUTSIDE_LOUDOUN_MESSAGE =
+  "This location is outside Loudoun County. Complaints can only be submitted for signs in Loudoun County.";
+export const COUNTY_NOT_VERIFIED_MESSAGE =
+  "We could not confirm this location's county. Retry location before submitting.";
+
+export function isLoudounCounty(county: string | null): boolean {
+  return county?.trim().toLocaleLowerCase("en-US") === "loudoun county";
+}
 
 export function buildReverseGeocodingUrl(location: CapturedLocation): URL {
   const url = new URL(REVERSE_URL);
@@ -25,7 +43,7 @@ export function buildReverseGeocodingUrl(location: CapturedLocation): URL {
   return url;
 }
 
-export function parseReverseGeocodingResponse(value: unknown): string {
+export function parseReverseGeocodingResponse(value: unknown): ReverseGeocodedLocation {
   if (!value || typeof value !== "object") {
     throw new ReverseGeocodingError("The address service returned invalid data.");
   }
@@ -35,13 +53,16 @@ export function parseReverseGeocodingResponse(value: unknown): string {
       typeof response.error === "string" ? response.error : "No nearby street address was found.",
     );
   }
-  return response.display_name.trim();
+  return {
+    address: response.display_name.trim(),
+    county: typeof response.address?.county === "string" ? response.address.county.trim() || null : null,
+  };
 }
 
 export async function reverseGeocode(
   location: CapturedLocation,
   fetcher: typeof fetch = fetch,
-): Promise<string> {
+): Promise<ReverseGeocodedLocation> {
   const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt));
   if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
   lastRequestAt = Date.now();
