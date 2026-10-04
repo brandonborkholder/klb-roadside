@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: "/klb-roadside/",
+  base: process.env.VITE_BASE_PATH ?? "/klb-roadside/",
   build: {
     sourcemap: true,
   },
