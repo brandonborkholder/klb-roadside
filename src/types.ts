@@ -35,3 +35,6 @@ export type SubmissionReceipt = {
   submittedAt: string;
   live: boolean;
 };
+
+export type ReportHistoryEntry = Pick<CapturedLocation, "latitude" | "longitude"> &
+  Pick<SubmissionReceipt, "submittedAt">;

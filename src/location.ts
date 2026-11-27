@@ -1,4 +1,4 @@
-import type { CapturedLocation } from "./types";
+import type { CapturedLocation, ReportHistoryEntry } from "./types";
 
 export class LocationError extends Error {
   constructor(message: string) {
@@ -59,4 +59,27 @@ export function formatCoordinates(location: CapturedLocation): string {
 
 export function locationQuality(accuracyMeters: number): "good" | "warning" {
   return accuracyMeters <= 100 ? "good" : "warning";
+}
+
+export function latestNearbyReport(
+  location: Pick<CapturedLocation, "latitude" | "longitude">,
+  history: readonly ReportHistoryEntry[],
+): ReportHistoryEntry | undefined {
+  const radians = Math.PI / 180;
+  // The haversine formula gives the straight-line surface distance.
+  const radiusMeters = 6_371_000;
+  const withinMeters = 500 * 0.3048;
+  let latest: ReportHistoryEntry | undefined;
+  for (const entry of history) {
+    const latitudeDelta = (entry.latitude - location.latitude) * radians;
+    const longitudeDelta = (entry.longitude - location.longitude) * radians;
+    const haversine = Math.sin(latitudeDelta / 2) ** 2 +
+      Math.cos(location.latitude * radians) * Math.cos(entry.latitude * radians) *
+      Math.sin(longitudeDelta / 2) ** 2;
+    const distance = 2 * radiusMeters * Math.asin(Math.min(1, Math.sqrt(haversine)));
+    if (distance <= withinMeters && (!latest || entry.submittedAt > latest.submittedAt)) {
+      latest = entry;
+    }
+  }
+  return latest;
 }
