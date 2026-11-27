@@ -1,4 +1,4 @@
-import type { PendingDraft, Profile } from "./types";
+import type { PendingDraft, Profile, ReportHistoryEntry } from "./types";
 
 const DATABASE_NAME = "sign-spotter";
 const DATABASE_VERSION = 1;
@@ -91,6 +91,23 @@ export class AppRepository {
 
   deleteDraft(): Promise<void> {
     return this.remove(DRAFT_KEY);
+  }
+
+  async getReportHistory(account: string): Promise<ReportHistoryEntry[]> {
+    return (await this.read<ReportHistoryEntry[]>(`report-history:${account}`)) ?? [];
+  }
+
+  async saveReportHistoryEntry(account: string, entry: ReportHistoryEntry): Promise<void> {
+    const database = await this.open();
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const key = `report-history:${account}`;
+    const request = store.get(key);
+    request.addEventListener("success", () => {
+      const history: ReportHistoryEntry[] = request.result ?? [];
+      store.put([...history, entry], key);
+    });
+    await transactionDone(transaction);
   }
 
   async hasSeenSplash(): Promise<boolean> {

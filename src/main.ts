@@ -8,7 +8,7 @@ import {
   resizePhotoFile,
   startCamera,
 } from "./camera";
-import { formatCoordinates, getCurrentLocation, getLocationReadiness, locationQuality } from "./location";
+import { formatCoordinates, getCurrentLocation, getLocationReadiness, latestNearbyReport, locationQuality } from "./location";
 import {
   COUNTY_NOT_VERIFIED_MESSAGE,
   isLoudounCounty,
@@ -419,6 +419,7 @@ function renderReview(): void {
           <button id="refresh-location" class="text-button compact-retry" type="button">Retry location</button>
           <label class="compact-address">Sign location<input id="violation-address" autocomplete="street-address" required /><span id="address-status" class="field-hint">Getting your current location…</span></label>
           <a class="map-credit" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">Address © OpenStreetMap contributors</a>
+          <p id="nearby-report" class="field-hint" role="status" hidden></p>
           <input id="description" type="hidden" />
           <p class="compact-summary"><strong>Photo + location</strong><span id="contact-summary"></span></p>
           <p id="review-feedback" class="feedback" role="alert"></p>
@@ -492,7 +493,16 @@ function renderReview(): void {
     try {
       draft!.status = "uncertain";
       await repository.saveDraft(draft!);
+      const location = draft!.location;
+      const account = profile!.publicStuffEmail.trim().toLowerCase();
       receipt = await submitReport(profile!, draft!);
+      if (location) {
+        void repository.saveReportHistoryEntry(account, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          submittedAt: receipt.submittedAt,
+        }).catch(() => { /* History is optional. */ });
+      }
       await repository.deleteDraft();
       draft = null;
       navigate("success");
@@ -548,7 +558,32 @@ function updateSubmitState(): void {
   if (button) button.disabled = !draft?.location || !isLoudounCounty(draft.locationCounty ?? null) || !address?.value.trim();
 }
 
+async function renderNearbyReport(): Promise<void> {
+  const notice = requireElement<HTMLElement>("nearby-report");
+  const location = draft?.location;
+  const account = profile?.publicStuffEmail.trim().toLowerCase();
+  notice.hidden = true;
+  if (!location || !account) return;
+
+  try {
+    const history = await repository.getReportHistory(account);
+    if (!notice.isConnected || draft?.location !== location ||
+        profile?.publicStuffEmail.trim().toLowerCase() !== account) return;
+    const latest = latestNearbyReport(location, history);
+    if (!latest) return;
+    const date = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(latest.submittedAt));
+    notice.textContent = `You last reported a sign within 500 ft on ${date}.`;
+    notice.hidden = false;
+  } catch {
+    // History can be unavailable while the report form is still usable.
+  }
+}
+
 function renderGpsPanel(): void {
+  void renderNearbyReport();
   const panel = requireElement<HTMLElement>("gps-panel");
   if (!draft?.location) {
     panel.className = "gps-panel gps-missing";
